@@ -1,0 +1,11 @@
+*.html
+*.json
+
+lib/
+lib/*
+
+tmp/
+tmp/*
+
+inverted_ds/
+inverted_ds/*
