@@ -7,11 +7,58 @@ from pathlib import Path
 import logging
 from collections import deque
 from collections import Counter 
+import numpy as np
+from scipy.sparse import coo_matrix, csr_matrix, save_npz, load_npz
+import json
 
 logging.basicConfig(
   level=logging.DEBUG,
   format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
 )
+
+def get_song_idx_dicts(songs):
+    song_to_idx = {
+        song_id : i for i, song_id in enumerate(songs)
+    }
+
+    idx_to_song = {
+        i : song_id for song_id, i in song_to_idx.items() 
+    }
+
+    return (song_to_idx, idx_to_song)
+
+def gen_sparse_mat(song_to_idx, sts):
+    rows = []
+    cols = []
+    weights = []
+    for song_a, song_b, weight in sts:
+        rows.append(song_to_idx[song_a])
+        cols.append(song_to_idx[song_b])
+        weights.append(weight)
+
+    graph_mat = coo_matrix(
+        (weights, (rows, cols)),
+        shape=(len(song_to_idx), len(song_to_idx)),
+        dtype=np.int32 # Consider float32
+    ).tocsr()
+
+    graph_mat = graph_mat.maximum(graph_mat.T) 
+
+    return graph_mat
+
+def get_top_connected_songs(graph_mat, idx_to_song, limit: int = 25):
+    connection_counts = graph_mat.getnnz(axis=1)
+
+    top_indices = connection_counts.argsort()[::-1][:limit]
+
+    return [
+      {
+          "song_id": idx_to_song[int(idx)],
+          "matrix_idx": int(idx),
+          "connection_count": int(connection_counts[idx]),
+      }
+      for idx in top_indices
+  ]
 
 def main():
     parser = argparse.ArgumentParser(description="A script meant to take both input datasets and generate a graph.")
@@ -19,6 +66,8 @@ def main():
     parser.add_argument("songs_to_playlists", type=Path, help="The path the songs to playlists dataset resides in.")
 
     parser.add_argument("playlists_to_songs", type=Path, help="The path the playlists to songs dataset resides in.")
+
+    parser.add_argument("mat_save_dir", type=Path, help="The path the output graph gets stored in.")
 
     args = parser.parse_args()
 
@@ -46,7 +95,9 @@ def main():
             playlists = stp_dataset[song_id]
             for playlist in playlists:
                 connected_songs_in_playlist = pts_dataset[str(playlist)]
-                connected_songs += connected_songs_in_playlist
+                # Ensure no double counting
+                connected_songs_in_playlist -= root_songs
+                connected_songs += list(connected_songs_in_playlist)
 
             connection_counter = Counter(connected_songs)
             connection_counter.pop(song_id, None)
@@ -60,35 +111,21 @@ def main():
             root_songs.add(song_id)
             logging.debug(f"{song_id} in {len(playlists)} playlists. Connected to {connection_counter.total()} songs")
     
-    logging.debug("Done creating graph")
-    G.add_weighted_edges_from((a, b, w) for a, b, w in sts[:50_000] if w >= 3)
-    logging.debug("Done creating graph nx object")
+    song_to_idx, idx_to_song = get_song_idx_dicts(stp_dataset.keys())
+    graph_mat = gen_sparse_mat(song_to_idx, sts)
 
+    top_connected_songs = get_top_connected_songs(graph_mat, idx_to_song, limit=100)
 
-#    G = nx.Graph()
-#
-#    # Add some nodes and relationships (edges)
-#    edges: list[tuple[str, str, float]] = [
-#        ("Alice", "Bob", 0.1),
-#        ("Bob", "Charlie", 0.1),
-#        ("Charlie", "David", 0.1),
-#        ("David", "Alice", 0.1),
-#        ("Alice", "Charlie", 0.1),
-#        ("Eve", "Alice", 0.1),
-#    ]
-#    G.add_weighted_edges_from(edges)
-#
-#    # Create a Pyvis network object
-    net = Network(notebook=False, height="750px", width="100%")
+    save_npz(args.mat_save_dir / "graph_mat.npz", graph_mat)
 
-    # Load the NetworkX graph into Pyvis
-    net.from_nx(G)
+    with open(args.mat_save_dir / "top_connected_songs.json", "w") as f:
+        json.dump(top_connected_songs, f, indent=4)
 
-    logging.debug("Done loading")
+    with open(args.mat_save_dir / "song_to_idx.json", "w") as f:
+        json.dump(song_to_idx, f, indent=4)
 
-    # Save and open the interactive graph in your browser
-    net.write_html("interactive_graph.html", open_browser=True)
-    logging.debug("Done creating HTML")
+    with open(args.mat_save_dir / "idx_to_song.json", "w") as f:
+        json.dump(idx_to_song, f, indent=4)
 
 if __name__ == "__main__":
     main()

@@ -2,3 +2,5 @@ networkx
 pyvis
 matplotlib
 pandas
+scipy
+numpy
