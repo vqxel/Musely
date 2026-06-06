@@ -4,8 +4,6 @@
 lib/
 lib/*
 
-tmp/
-tmp/*
+dataset/
+dataset/*
 
-inverted_ds/
-inverted_ds/*
