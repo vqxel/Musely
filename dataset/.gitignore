@@ -4,6 +4,6 @@
 lib/
 lib/*
 
-dataset/
-dataset/*
+data/
+data/*
 
